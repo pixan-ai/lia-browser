@@ -46,18 +46,18 @@ def scrape_divya():
             page = context.new_page()
 
             # Navegar — redirige a login automáticamente
-            page.goto(url)
-            page.wait_for_load_state("networkidle")
+            page.goto(url, timeout=60000)
+            page.wait_for_load_state("networkidle", timeout=60000)
 
             # Login si es necesario
             if "/auth/login" in page.url or "/login" in page.url:
                 page.fill('input[name="username"], input[type="text"]', user)
                 page.fill('input[name="password"], input[type="password"]', password)
                 page.click('button[type="submit"]')
-                page.wait_for_load_state("networkidle")
+                page.wait_for_load_state("networkidle", timeout=60000)
 
             # Esperar tabla de resultados
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(5000)
             html = page.content()
             browser.close()
 
