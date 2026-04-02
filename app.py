@@ -1,21 +1,22 @@
 """
-lia-browser — Servicio de scraping con Playwright para Lia
+lia-browser — Servicio de scraping para Lia
+Sin Playwright — usa requests + BeautifulSoup directamente
 """
 import os
-import json
 from flask import Flask, request, jsonify
-from playwright.sync_api import sync_playwright
+from scraper import get_divya_report
 from bs4 import BeautifulSoup
+import requests as req
 
 app = Flask(__name__)
 
 API_KEY = os.environ.get("LIA_BROWSER_KEY", "")
 
 
-def check_auth(req):
+def check_auth(r):
     if not API_KEY:
         return True
-    return req.headers.get("X-API-Key") == API_KEY
+    return r.headers.get("X-API-Key") == API_KEY
 
 
 @app.route("/health", methods=["GET"])
@@ -35,49 +36,16 @@ def scrape_divya():
     if not date_from or not date_until:
         return jsonify({"error": "Faltan parámetros: from, until"}), 400
 
-    url = f"https://pos.divya.com.mx/sales/general-report?from={date_from}&until={date_until}&type=all"
     user = os.environ.get("DIVYA_USER", "alfredo")
     password = os.environ.get("DIVYA_PASSWORD", "")
 
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context()
-            page = context.new_page()
-
-            # Navegar — redirige a login automáticamente
-            page.goto(url, timeout=60000, wait_until="domcontentloaded")
-            page.wait_for_timeout(3000)
-
-            # Login si es necesario
-            if "/auth/login" in page.url or "/login" in page.url:
-                page.wait_for_selector('input[type="text"], input[name="username"]', timeout=15000)
-                page.fill('input[name="username"], input[type="text"]', user)
-                page.fill('input[name="password"], input[type="password"]', password)
-                page.click('button[type="submit"]')
-                page.wait_for_timeout(5000)
-                page.wait_for_load_state("domcontentloaded", timeout=60000)
-
-            # Esperar tabla de resultados
-            page.wait_for_timeout(8000)
-            html = page.content()
-            browser.close()
-
-        soup = BeautifulSoup(html, "html.parser")
-        return jsonify({
-            "status": "ok",
-            "from": date_from,
-            "until": date_until,
-            "html": str(soup)
-        })
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    result = get_divya_report(date_from, date_until, user, password)
+    return jsonify(result)
 
 
 @app.route("/scrape/raw", methods=["POST"])
 def scrape_raw():
-    """Scraping genérico — cualquier URL"""
+    """Scraping genérico — cualquier URL pública"""
     if not check_auth(request):
         return jsonify({"error": "Unauthorized"}), 401
 
@@ -87,18 +55,12 @@ def scrape_raw():
         return jsonify({"error": "Falta parámetro: url"}), 400
 
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
-            page.goto(url)
-            page.wait_for_load_state("networkidle")
-            html = page.content()
-            browser.close()
-
-        soup = BeautifulSoup(html, "html.parser")
+        resp = req.get(url, timeout=30, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        })
+        soup = BeautifulSoup(resp.text, "html.parser")
         text = soup.get_text(separator="\n", strip=True)
         return jsonify({"status": "ok", "url": url, "text": text[:10000]})
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
